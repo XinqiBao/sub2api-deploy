@@ -1,0 +1,10 @@
+.env
+data/
+postgres_data/
+redis_data/
+tailscale/state/
+backups/
+*.tar.gz
+*.log
+.DS_Store
+._*
