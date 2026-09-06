@@ -62,7 +62,7 @@ services:
       start_period: 30s
 
   tailscale:
-    image: tailscale/tailscale:${TAILSCALE_VERSION:-latest}
+    image: tailscale/tailscale:stable
     container_name: sub2api-tailscale
     restart: unless-stopped
     logging: *default-logging

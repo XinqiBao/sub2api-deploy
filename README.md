@@ -134,7 +134,7 @@ sudo docker compose -f docker-compose.yaml up -d
 sudo docker compose -f docker-compose.yaml ps
 ```
 
-Sub2API is pinned so its upgrades and rollbacks are visible in Git. Tailscale defaults to its official `latest` image; set `TAILSCALE_VERSION` to an explicit release in both `.env.example` and `.env` if fully reproducible upgrades are preferred.
+Sub2API is pinned to an exact release so its upgrades and rollbacks are visible in Git. Tailscale uses its official rolling `stable` tag, while PostgreSQL and Redis follow their pinned major-version tags. These supporting images update only when they are explicitly pulled.
 
 ## Backup and restore
 
