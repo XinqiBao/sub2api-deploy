@@ -119,7 +119,9 @@ On a NAS where the SSH user cannot access `/var/run/docker.sock`, use `sudo dock
 
 ## Upgrade
 
-Check the [Sub2API releases](https://github.com/Wei-Shaw/sub2api/releases). For a Sub2API image upgrade, update `SUB2API_VERSION` in the Git-tracked `.env.example`, commit it, and set the same value in the deployment host's `.env`.
+Check the [Sub2API releases](https://github.com/Wei-Shaw/sub2api/releases). For a Sub2API image upgrade, update the image tag for the `sub2api` service in the Git-tracked `docker-compose.yaml` and commit the change. The Compose file is the single source of truth for the deployed Sub2API version; no matching host `.env` change is needed.
+
+Use this image-based workflow for Docker deployments. An update started from the Sub2API dashboard replaces the executable only inside the current container and is lost when that container is recreated.
 
 If Git is available on the deployment host, update the versioned files with `git pull --ff-only`. Otherwise, upload only the tracked files listed in the **Files and data** section. Never replace `.env` or a runtime directory with files from another machine.
 
