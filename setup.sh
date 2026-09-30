@@ -35,7 +35,9 @@ fi
 mkdir -p data postgres_data redis_data tailscale/state backups
 
 echo "Deployment is ready. Start it with: docker compose -f docker-compose.yaml up -d"
-echo "Web UI: http://<NAS-IP>:$(sed -n 's/^SERVER_PORT=//p' .env)"
-echo "Admin email: $(sed -n 's/^ADMIN_EMAIL=//p' .env)"
+server_port="$(sed -n 's/^SERVER_PORT=//p' .env)"
+admin_email="$(sed -n 's/^ADMIN_EMAIL=//p' .env)"
+echo "Web UI: http://<HOST-IP>:${server_port:-18080}"
+echo "Admin email: ${admin_email:-admin@sub2api.local}"
 echo "Admin password: $(sed -n 's/^ADMIN_PASSWORD=//p' .env)"
-echo "Tailscale will wait for first-time registration until TS_AUTHKEY is set."
+echo "Optional Tailscale: docker compose -f docker-compose.yaml --profile tailscale up -d"
