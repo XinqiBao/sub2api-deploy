@@ -63,6 +63,7 @@ services:
 
   tailscale:
     image: tailscale/tailscale:stable
+    profiles: [tailscale]
     container_name: sub2api-tailscale
     restart: unless-stopped
     logging: *default-logging

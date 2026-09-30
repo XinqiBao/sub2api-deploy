@@ -1,10 +1,10 @@
-# Sub2API NAS Deployment
+# Sub2API Docker Compose Deployment
 
 Reusable Docker Compose deployment for [Sub2API](https://github.com/Wei-Shaw/sub2api), with an optional dedicated Tailscale identity for private remote access. PostgreSQL, Redis, application data, and Tailscale state are stored in local directories so the deployment is easy to back up and move.
 
 The two supported access paths are:
 
-- LAN: `http://NAS-IP:18080`
+- LAN: `http://HOST-IP:18080`
 - Tailnet: `https://sub2api.<tailnet-name>.ts.net`
 
 The Tailscale endpoint uses HTTPS but is not public. It is reachable only by devices and people authorized in the Tailnet; Tailscale Funnel is explicitly disabled.
@@ -16,10 +16,10 @@ The Git repository is the source of truth for the versioned deployment files. Ea
 
 ## Requirements
 
-- A NAS or Linux server with Docker Engine, Docker Compose v2, and `/dev/net/tun`
-- Git and OpenSSL
+- Docker Engine and Docker Compose v2
+- A POSIX shell and OpenSSL for `setup.sh`; Git is optional
 - About 2 GB of free memory as a practical starting point
-- A Tailscale account if private remote access is wanted
+- For optional Tailscale access: a Linux Docker host with `/dev/net/tun` and a Tailscale account
 
 ## First deployment
 
@@ -33,7 +33,7 @@ docker compose up -d
 docker compose ps
 ```
 
-If the NAS does not provide Git, download the repository archive on another computer, extract it, and upload the project files with the NAS file manager. Do not upload `data/`, `postgres_data/`, or `redis_data/` from a running deployment. Then connect over SSH and run:
+If the Docker host does not provide Git, transfer the tracked project files by another method. Do not transfer `data/`, `postgres_data/`, or `redis_data/` from a running deployment. Then run:
 
 ```bash
 cd /path/to/sub2api-deploy
@@ -42,15 +42,16 @@ sudo docker compose -f docker-compose.yaml up -d
 sudo docker compose -f docker-compose.yaml ps
 ```
 
-Open `http://NAS-IP:18080`. The setup script prints the generated admin password. It can also be read locally from `.env`:
+Open `http://HOST-IP:18080`. The setup script prints the generated admin password. It can also be read locally from `.env`:
 
 ```bash
-grep -E '^ADMIN_(EMAIL|PASSWORD)=' .env
+grep '^ADMIN_PASSWORD=' .env
 ```
 
-`setup.sh` creates `.env` with random admin, database, Redis, JWT, and TOTP secrets. It does not require a system administrator password. If your NAS restricts Docker access, prefix Docker commands with `sudo` or run them from the NAS Docker application.
+`setup.sh` creates `.env` with random admin, database, Redis, JWT, and TOTP secrets. It does not require a system administrator password. If your user cannot access Docker, prefix Docker commands with `sudo` or use the host's Docker UI.
+Other settings use the defaults in `docker-compose.yaml`. Add an override to `.env` only when needed, such as `SERVER_PORT`, `BIND_HOST`, `TAILSCALE_HOSTNAME`, or `UPDATE_PROXY_URL`.
 
-The Tailscale container may wait for authentication when `TS_AUTHKEY` is empty. This does not prevent Sub2API, PostgreSQL, or Redis from starting. Complete the Tailscale setup below when remote access is wanted.
+Tailscale is optional and is not started by the default `docker compose up -d`. Complete the Tailscale setup below when private remote access is wanted.
 
 The admin account is created only during the first database initialization. Changing `ADMIN_PASSWORD` in `.env` later does not reset an existing account password; change it in the web dashboard instead.
 
@@ -62,7 +63,7 @@ For a personal interactive deployment, no auth key is required:
 2. Leave `TS_AUTHKEY=` empty in `.env` and start the service:
 
    ```bash
-   sudo docker compose -f docker-compose.yaml up -d tailscale
+   sudo docker compose -f docker-compose.yaml --profile tailscale up -d tailscale
    sudo docker compose -f docker-compose.yaml logs -f tailscale
    ```
 
@@ -79,14 +80,14 @@ TS_AUTHKEY=tskey-auth-...
 Start or recreate the service:
 
 ```bash
-sudo docker compose -f docker-compose.yaml up -d --force-recreate tailscale
+sudo docker compose -f docker-compose.yaml --profile tailscale up -d --force-recreate tailscale
 sudo docker compose -f docker-compose.yaml logs -f tailscale
 ```
 
 After registration succeeds, set `TS_AUTHKEY=` again and recreate the service. The identity remains active because it is persisted in `tailscale/state/`:
 
 ```bash
-sudo docker compose -f docker-compose.yaml up -d --force-recreate tailscale
+sudo docker compose -f docker-compose.yaml --profile tailscale up -d --force-recreate tailscale
 ```
 
 Do not paste `.env`, `docker compose config`, or `docker inspect sub2api-tailscale` output into an issue or chat while an auth key is present: Docker environment inspection can reveal it. Removing the key after registration keeps this exposure short-lived.
@@ -105,7 +106,7 @@ docker compose logs -f sub2api
 # Follow private-access logs
 docker compose logs -f tailscale
 
-# Restart everything
+# Restart core services
 docker compose restart
 
 # Stop without deleting data
@@ -115,7 +116,9 @@ docker compose down
 docker compose up -d
 ```
 
-On a NAS where the SSH user cannot access `/var/run/docker.sock`, use `sudo docker compose ...` for every Docker command. The top-level Compose project name is fixed to `sub2api`, so CLI commands and a NAS Docker UI refer to the same project.
+On a host using the Tailscale profile, add `--profile tailscale` to whole-stack commands such as `restart`, `down`, and `up` so they include Tailscale.
+
+If the user cannot access `/var/run/docker.sock`, use `sudo docker compose ...` for every Docker command. The top-level Compose project name is fixed to `sub2api`.
 
 ## Upgrade
 
@@ -125,14 +128,31 @@ Use this image-based workflow for Docker deployments. An update started from the
 
 If Git is available on the deployment host, update the versioned files with `git pull --ff-only`. Otherwise, upload only the tracked files listed in the **Files and data** section. Never replace `.env` or a runtime directory with files from another machine.
 
-After updating, compare `.env.example` with `.env` and deliberately add any new keys. Never copy `.env.example` over `.env`. Then apply the update:
+Before an application upgrade, make an online database backup. This does not restart the service:
 
 ```bash
 cd /path/to/sub2api-deploy
-sudo docker compose -f docker-compose.yaml pull
-sudo docker compose -f docker-compose.yaml up -d
+umask 077
+backup_file="backups/sub2api-$(date +%Y%m%d-%H%M%S).dump"
+sudo docker compose -f docker-compose.yaml exec -T postgres \
+  sh -c 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$backup_file"
+test -s "$backup_file"
+sudo docker compose -f docker-compose.yaml exec -T postgres \
+  pg_restore -l < "$backup_file" > /dev/null
+```
+
+Copy the dump off the Docker host before deleting the local copy. It contains application data and should be kept private. A readable archive is useful for recovery, but only a test restore proves the full restore path.
+
+After updating, compare `.env.example` with `.env` and deliberately add any new required keys. Never copy `.env.example` over `.env`. Pull and recreate only the application:
+
+```bash
+cd /path/to/sub2api-deploy
+sudo docker compose -f docker-compose.yaml pull sub2api
+sudo docker compose -f docker-compose.yaml up -d --no-deps sub2api
 sudo docker compose -f docker-compose.yaml ps
 ```
+
+Recreating `sub2api` briefly interrupts the UI, API, and any SSH session routed through this instance. Keep an independent host access path available before upgrading.
 
 Sub2API is pinned to an exact release so its upgrades and rollbacks are visible in Git. Tailscale uses its official rolling `stable` tag, while PostgreSQL and Redis follow their pinned major-version tags. These supporting images update only when they are explicitly pulled.
 
@@ -148,16 +168,17 @@ docker compose up -d
 ```
 
 Copy the archive somewhere outside this directory. To restore, stop the stack, extract the archive into the repository directory, and start the stack again.
+If Tailscale is enabled, add `--profile tailscale` to both Compose commands above.
 
 Do not copy `postgres_data/` while PostgreSQL is running. A live file-level copy can produce a database whose catalog references files that were never copied. Use the stop-and-archive procedure above, or use `pg_dump` for an online logical backup.
 
 ## LAN and remote access
 
-The default `BIND_HOST=0.0.0.0` exposes host port `18080` on every NAS network interface. Devices on the home network can use `http://NAS-IP:18080` if the NAS firewall permits it. The application still listens on port `8080` inside its container. Use HTTP, not HTTPS, when accessing the host port directly.
+The default `BIND_HOST=0.0.0.0` exposes host port `18080` on every network interface. Other devices can use `http://HOST-IP:18080` if the host firewall permits it. The application still listens on port `8080` inside its container. Use HTTP, not HTTPS, when accessing the host port directly.
 
 For remote access, the `tailscale` service runs as its own Tailnet machine and proxies Tailscale HTTPS traffic to `http://sub2api:8080` over the private Docker network. It publishes no host port, advertises no subnet route or exit node, and has Tailscale Funnel disabled.
 
-Do not forward `18080`, `8080`, or a Tailscale container port on the home router. Tailscale works through NAT without a public inbound port. Changing `18080` can avoid a local collision, but does not itself improve security.
+Do not forward `18080`, `8080`, or a Tailscale container port on the router. Tailscale works through NAT without a public inbound port. Changing `18080` can avoid a local collision, but does not itself improve security.
 
 ### Clash TUN coexistence
 
@@ -177,17 +198,6 @@ curl -I https://www.google.com
 ```
 
 On iOS and Android, the operating system normally permits only one active VPN tunnel. A Tailscale app and a Clash app therefore generally cannot both run in VPN/TUN mode at the same time. Use one tunnel, move the proxy function to a router, or use an app-specific proxy instead.
-
-## NAS Docker UI notes
-
-The repository intentionally uses `docker-compose.yaml`, which the NAS Docker application recognizes. Prefer managing this repository through SSH, or explicitly select the same file used by the NAS UI:
-
-```bash
-sudo docker compose -f docker-compose.yaml ps
-sudo docker compose -f docker-compose.yaml logs -f sub2api
-```
-
-Keep only this one active Compose file. If a container was originally created from another file name, recreate the project once from `docker-compose.yaml` so the NAS UI and CLI refer to the same definition.
 
 ## Client use
 
